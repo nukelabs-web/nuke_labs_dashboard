@@ -28,8 +28,23 @@ export function AuthProvider({ children }) {
         if (data) {
           setUser({ ...sessionUser, ...data });
         } else {
-          // Fallback for demo/new users
-          setUser({ ...sessionUser, position: 'Junior Executive' });
+          // New user - sync to public table
+          const { data: newUser, error: insertError } = await supabase
+            .from('users')
+            .insert({
+              email: sessionUser.email,
+              name: sessionUser.user_metadata?.full_name || sessionUser.email.split('@')[0],
+              position: 'Junior Executive',
+            })
+            .select()
+            .single();
+          
+          if (newUser) {
+            setUser({ ...sessionUser, ...newUser });
+          } else {
+            // Memory fallback if DB insert fails
+            setUser({ ...sessionUser, position: 'Junior Executive' });
+          }
         }
       } catch (e) {
         setUser({ ...sessionUser, position: 'Junior Executive' });
