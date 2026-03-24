@@ -28,13 +28,38 @@ export function AuthProvider({ children }) {
         if (data) {
           setUser({ ...sessionUser, ...data });
         } else {
-          // New user - sync to public table
+          // New user - sync to public table with automated ID
+          const year = new Date().getFullYear().toString().slice(-2);
+          const position = 'Junior Executive';
+          
+          // Map positions to 2-letter codes
+          const posCodes = {
+            'Founder': 'FD',
+            'Core Team': 'CT',
+            'Senior Executive': 'SE',
+            'Business Development Executive': 'BD',
+            'Operations Executive': 'OE',
+            'Marketing Executive': 'ME',
+            'Junior Executive': 'JE'
+          };
+          const code = posCodes[position] || 'XX';
+
+          // Get count for sequence
+          const { count } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true });
+          
+          const sequence = (count + 1).toString().padStart(3, '0');
+          const employeeId = `NL-${year}-${code}-${sequence}`;
+
           const { data: newUser, error: insertError } = await supabase
             .from('users')
             .insert({
               email: sessionUser.email,
               name: sessionUser.user_metadata?.full_name || sessionUser.email.split('@')[0],
-              position: 'Junior Executive',
+              position: position,
+              employee_id: employeeId,
+              status: 'Active'
             })
             .select()
             .single();
@@ -42,8 +67,7 @@ export function AuthProvider({ children }) {
           if (newUser) {
             setUser({ ...sessionUser, ...newUser });
           } else {
-            // Memory fallback if DB insert fails
-            setUser({ ...sessionUser, position: 'Junior Executive' });
+            setUser({ ...sessionUser, position: position });
           }
         }
       } catch (e) {
