@@ -40,13 +40,21 @@ export default function WorkshopsPage() {
   const handleSave = async () => {
     const payload = { ...form, expected_students: Number(form.expected_students) || 0, actual_students: form.actual_students ? Number(form.actual_students) : null };
     try {
+      let result;
       if (editingId) {
-        await supabase.from('workshops').update(payload).eq('id', editingId);
+        result = await supabase.from('workshops').update(payload).eq('id', editingId);
       } else {
         const wid = `WS-${new Date().getFullYear()}-${String(workshops.length + 1).padStart(3, '0')}`;
-        await supabase.from('workshops').insert({ ...payload, workshop_id: wid });
+        result = await supabase.from('workshops').insert({ ...payload, workshop_id: wid });
       }
+
+      if (result.error) {
+        alert(`Error: ${result.error.message}`);
+        return;
+      }
+
       fetchWorkshops();
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     } catch (e) {
       if (editingId) {
         setWorkshops(workshops.map(w => w.id === editingId ? { ...w, ...payload } : w));
@@ -54,10 +62,8 @@ export default function WorkshopsPage() {
         const wid = `WS-${new Date().getFullYear()}-${String(workshops.length + 1).padStart(3, '0')}`;
         setWorkshops([{ ...payload, id: Date.now(), workshop_id: wid }, ...workshops]);
       }
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     }
-    setShowModal(false);
-    setEditingId(null);
-    setForm(emptyForm);
   };
 
   const handleEdit = (ws) => {
@@ -68,8 +74,16 @@ export default function WorkshopsPage() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this workshop?')) return;
-    try { await supabase.from('workshops').delete().eq('id', id); fetchWorkshops(); }
-    catch (e) { setWorkshops(workshops.filter(w => w.id !== id)); }
+    try {
+      const { error } = await supabase.from('workshops').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete: ${error.message}${error.details ? ` (${error.details})` : ''}`);
+        return;
+      }
+      fetchWorkshops();
+    } catch (e) {
+      setWorkshops(workshops.filter(w => w.id !== id));
+    }
   };
 
   const columns = [
@@ -105,7 +119,7 @@ export default function WorkshopsPage() {
       <DataTable columns={columns} data={workshops} searchPlaceholder="Search workshops..." searchKey={['college_name', 'city', 'trainer_name', 'workshop_type']} filters={filters} />
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Workshop' : 'Add Workshop'} maxWidth="max-w-2xl">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="College" required><Input value={form.college_name} onChange={e => set('college_name', e.target.value)} /></FormField>
           <FormField label="City" required><Input value={form.city} onChange={e => set('city', e.target.value)} /></FormField>
           <FormField label="Workshop Type" required><Input value={form.workshop_type} onChange={e => set('workshop_type', e.target.value)} placeholder="Drone, IoT, Robotics..." /></FormField>

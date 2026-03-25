@@ -53,36 +53,64 @@ export default function TasksPage() {
   };
 
   // Filter based on user rank
-  const filteredTasks = user?.position === 'Junior Executive' 
+  const isJuniorOnly = (user?.position?.includes('Junior Executive') || false) && !hasPermission('viewAll');
+  const filteredTasks = isJuniorOnly 
     ? tasks.filter(t => t.assigned_person === user.name)
     : tasks;
 
   const handleSave = async () => {
     try {
-      if (editingId) { await supabase.from('tasks').update(form).eq('id', editingId); }
-      else { await supabase.from('tasks').insert(form); }
+      let result;
+      if (editingId) {
+        result = await supabase.from('tasks').update(form).eq('id', editingId);
+      } else {
+        result = await supabase.from('tasks').insert(form);
+      }
+
+      if (result.error) {
+        alert(`Error: ${result.error.message}`);
+        return;
+      }
+
       fetchTasks();
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     } catch (e) {
       if (editingId) { setTasks(tasks.map(t => t.id === editingId ? { ...t, ...form } : t)); }
       else { setTasks([{ ...form, id: Date.now() }, ...tasks]); }
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     }
-    setShowModal(false); setEditingId(null); setForm(emptyForm);
   };
 
   const handleEdit = (t) => {
-    if (user?.position === 'Junior Executive' && t.assigned_person !== user.name) return;
+    if (isJuniorOnly && t.assigned_person !== user.name) return;
     setForm(t); setEditingId(t.id); setShowModal(true); 
   };
 
   const handleStatusChange = async (task, newStatus) => {
-    try { await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id); fetchTasks(); }
-    catch (e) { setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t)); }
+    try {
+      const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id);
+      if (error) {
+        alert(`Failed to update status: ${error.message}`);
+        return;
+      }
+      fetchTasks();
+    } catch (e) {
+      setTasks(tasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    }
   };
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this task?')) return;
-    try { await supabase.from('tasks').delete().eq('id', id); fetchTasks(); }
-    catch (e) { setTasks(tasks.filter(t => t.id !== id)); }
+    try {
+      const { error } = await supabase.from('tasks').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete: ${error.message}`);
+        return;
+      }
+      fetchTasks();
+    } catch (e) {
+      setTasks(tasks.filter(t => t.id !== id));
+    }
   };
 
   const columns = [
@@ -135,8 +163,8 @@ export default function TasksPage() {
     <div className="animate-fade-in">
       <PageHeader 
         title="Tasks" 
-        subtitle={user?.position === 'Junior Executive' ? "My assigned tasks" : "Internal task management"} 
-        buttonLabel={hasPermission('assignTasks') || user?.position === 'Junior Executive' ? "Add Task" : null} 
+        subtitle={isJuniorOnly ? "My assigned tasks" : "Internal task management"} 
+        buttonLabel={hasPermission('assignTasks') || isJuniorOnly ? "Add Task" : null} 
         onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} 
       />
       <DataTable columns={columns} data={filteredTasks} searchPlaceholder="Search tasks..." searchKey={['title', 'assigned_person', 'department']} filters={filters} />
@@ -145,7 +173,7 @@ export default function TasksPage() {
         <div className="space-y-4">
           <FormField label="Title" required><Input value={form.title} onChange={e => set('title', e.target.value)} /></FormField>
           <FormField label="Description"><Textarea value={form.description} onChange={e => set('description', e.target.value)} /></FormField>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Assigned To" required>
               <Select 
                 options={teamMembers} 

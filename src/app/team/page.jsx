@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/components/AuthProvider';
 import PageHeader from '@/components/PageHeader';
 import DataTable from '@/components/DataTable';
 import StatusBadge from '@/components/StatusBadge';
@@ -23,9 +24,10 @@ const demoRoleHistory = [
   { id: 2, employee_id: 'NL-25-CT-002', employee_name: 'Meera Joshi', old_role: 'Senior Executive', new_role: 'Core Team', change_type: 'Promotion', changed_by: 'Ankit Verma', created_at: '2026-01-10' },
 ];
 
-const emptyForm = { name: '', employee_id: '', position: 'Junior Executive', email: '', department: '', status: 'Active' };
+const emptyForm = { name: '', employee_id: '', position: ['Junior Executive'], email: '', department: [], status: 'Active' };
 
 export default function TeamPage() {
+  const { user, hasPermission } = useAuth();
   const [team, setTeam] = useState(demoTeam);
   const [showModal, setShowModal] = useState(false);
   const [showActionModal, setShowActionModal] = useState(false);
@@ -57,22 +59,48 @@ export default function TeamPage() {
 
   const handleSave = async () => {
     try {
-      if (editingId) { await supabase.from('users').update(form).eq('id', editingId); }
-      else { await supabase.from('users').insert(form); }
+      // Ensure arrays
+      const payload = { 
+        ...form, 
+        position: Array.isArray(form.position) ? form.position : [form.position],
+        department: Array.isArray(form.department) ? form.department : (form.department ? [form.department] : [])
+      };
+      
+      let result;
+      if (editingId) {
+        result = await supabase.from('users').update(payload).eq('id', editingId);
+      } else {
+        result = await supabase.from('users').insert(payload);
+      }
+
+      if (result.error) {
+        alert(`Error: ${result.error.message}`);
+        return;
+      }
+
       fetchTeam();
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     } catch (e) {
       if (editingId) { setTeam(team.map(t => t.id === editingId ? { ...t, ...form } : t)); }
       else { setTeam([{ ...form, id: Date.now(), assigned_tasks: 0, assigned_colleges: 0 }, ...team]); }
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     }
-    setShowModal(false); setEditingId(null); setForm(emptyForm);
   };
 
   const handleEdit = (t) => { setForm(t); setEditingId(t.id); setShowModal(true); };
 
   const handleDelete = async (id) => {
     if (!confirm('Remove this team member?')) return;
-    try { await supabase.from('users').delete().eq('id', id); fetchTeam(); }
-    catch (e) { setTeam(team.filter(t => t.id !== id)); }
+    try {
+      const { error } = await supabase.from('users').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete: ${error.message}`);
+        return;
+      }
+      fetchTeam();
+    } catch (e) {
+      setTeam(team.filter(t => t.id !== id));
+    }
   };
 
   const getPositionRank = (pos) => POSITIONS.find(p => p.name === pos)?.rank || 99;
@@ -80,8 +108,13 @@ export default function TeamPage() {
   const openAction = (member, type) => {
     setSelectedMember(member);
     setActionType(type);
-    setNewPosition(member.position);
-    setNewDepartment(member.department);
+    
+    // For promotion/transfer, we deal with the "Primary" (first) role/dept
+    const primaryPos = Array.isArray(member.position) ? member.position[0] : member.position;
+    const primaryDept = Array.isArray(member.department) ? member.department[0] : member.department;
+    
+    setNewPosition(primaryPos || 'Junior Executive');
+    setNewDepartment(primaryDept || '');
     setShowActionModal(true);
   };
 
@@ -94,11 +127,16 @@ export default function TeamPage() {
       old_role: selectedMember.position,
       new_role: newPosition,
       change_type: getPositionRank(newPosition) < getPositionRank(selectedMember.position) ? 'Promotion' : 'Demotion',
-      changed_by: 'Admin',
+      changed_by: user?.name || 'Admin',
     };
 
     try {
-      await supabase.from('users').update({ position: newPosition }).eq('id', selectedMember.id);
+      const updateResult = await supabase.from('users').update({ position: newPosition }).eq('id', selectedMember.id);
+      if (updateResult.error) {
+        alert(`Failed to update role: ${updateResult.error.message}`);
+        return;
+      }
+      
       await supabase.from('role_change_log').insert(logEntry);
       fetchTeam(); fetchRoleHistory();
     } catch (e) {
@@ -111,7 +149,11 @@ export default function TeamPage() {
   const handleTransferDepartment = async () => {
     if (!selectedMember) return;
     try {
-      await supabase.from('users').update({ department: newDepartment }).eq('id', selectedMember.id);
+      const { error } = await supabase.from('users').update({ department: newDepartment }).eq('id', selectedMember.id);
+      if (error) {
+        alert(`Failed to transfer: ${error.message}`);
+        return;
+      }
       fetchTeam();
     } catch (e) {
       setTeam(team.map(t => t.id === selectedMember.id ? { ...t, department: newDepartment } : t));
@@ -123,7 +165,11 @@ export default function TeamPage() {
     if (!selectedMember) return;
     const newStatus = selectedMember.status === 'Active' ? 'Inactive' : 'Active';
     try {
-      await supabase.from('users').update({ status: newStatus }).eq('id', selectedMember.id);
+      const { error } = await supabase.from('users').update({ status: newStatus }).eq('id', selectedMember.id);
+      if (error) {
+        alert(`Failed to ${newStatus === 'Inactive' ? 'deactivate' : 'reactivate'}: ${error.message}`);
+        return;
+      }
       fetchTeam();
     } catch (e) {
       setTeam(team.map(t => t.id === selectedMember.id ? { ...t, status: newStatus } : t));
@@ -151,30 +197,56 @@ export default function TeamPage() {
         </div>
       </div>
     )},
-    { key: 'position', label: 'Position', render: (row) => <StatusBadge status={row.position} /> },
-    { key: 'department', label: 'Department' },
+    { key: 'position', label: 'Positions', render: (row) => (
+      <div className="flex flex-wrap gap-1">
+        {(Array.isArray(row.position) ? row.position : [row.position]).map((pos, i) => (
+          <StatusBadge key={i} status={pos} />
+        ))}
+      </div>
+    )},
+    { key: 'department', label: 'Departments', render: (row) => (
+      <div className="flex flex-wrap gap-1">
+        {(Array.isArray(row.department) ? row.department : [row.department]).map((dept, i) => (
+          <span key={i} className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded bg-nuke-bg text-nuke-muted border border-nuke-border">
+            {dept}
+          </span>
+        ))}
+        {(!row.department || row.department.length === 0) && <span className="text-nuke-muted italic text-xs">—</span>}
+      </div>
+    )},
     { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status || 'Active'} /> },
     { key: 'assigned_tasks', label: 'Tasks', render: (row) => <span className="font-semibold">{row.assigned_tasks || 0}</span> },
     {
       key: 'actions', label: 'Actions', sortable: false,
       render: (row) => (
         <div className="flex gap-1 flex-wrap">
-          <button onClick={(e) => { e.stopPropagation(); openAction(row, 'promote'); }} className="p-1.5 text-status-green hover:bg-status-green/10 rounded transition-colors" title="Promote">
-            <ArrowUp size={14} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); openAction(row, 'demote'); }} className="p-1.5 text-status-yellow hover:bg-status-yellow/10 rounded transition-colors" title="Change Role">
-            <RefreshCw size={14} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); openAction(row, 'transfer'); }} className="p-1.5 text-status-blue hover:bg-status-blue/10 rounded transition-colors" title="Transfer Dept">
-            <ArrowDown size={14} />
-          </button>
+          {hasPermission('promote') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openAction(row, 'promote'); }} className="p-1.5 text-status-green hover:bg-status-green/10 rounded transition-colors" title="Promote">
+                <ArrowUp size={14} />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); openAction(row, 'demote'); }} className="p-1.5 text-status-yellow hover:bg-status-yellow/10 rounded transition-colors" title="Change Role">
+                <RefreshCw size={14} />
+              </button>
+            </>
+          )}
+          {hasPermission('assignTasks') && (
+            <button onClick={(e) => { e.stopPropagation(); openAction(row, 'transfer'); }} className="p-1.5 text-status-blue hover:bg-status-blue/10 rounded transition-colors" title="Transfer Dept">
+              <ArrowDown size={14} />
+            </button>
+          )}
           <button onClick={(e) => { e.stopPropagation(); viewMemberHistory(row); }} className="p-1.5 text-status-purple hover:bg-status-purple/10 rounded transition-colors" title="Role History">
             <History size={14} />
           </button>
-          <button onClick={(e) => { e.stopPropagation(); openAction(row, 'deactivate'); }} className="p-1.5 text-status-red hover:bg-status-red/10 rounded transition-colors" title="Deactivate">
-            <UserX size={14} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); handleEdit(row); }} className="px-2 py-1 text-xs text-nuke-orange hover:bg-nuke-orange/10 rounded transition-colors">Edit</button>
+          {hasPermission('manageUsers') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openAction(row, 'deactivate'); }} className="p-1.5 text-status-red hover:bg-status-red/10 rounded transition-colors" title="Deactivate">
+                <UserX size={14} />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); handleEdit(row); }} className="px-2 py-1 text-xs text-nuke-orange hover:bg-nuke-orange/10 rounded transition-colors">Edit</button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="px-2 py-1 text-xs text-status-red hover:bg-status-red/10 rounded transition-colors">Remove</button>
+            </>
+          )}
         </div>
       ),
     },
@@ -190,23 +262,99 @@ export default function TeamPage() {
 
   return (
     <div className="animate-fade-in">
-      <PageHeader title="Team" subtitle="Team directory and position management" buttonLabel="Add Member" onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} />
+      <PageHeader 
+        title="Team" 
+        subtitle="Team directory and position management" 
+        buttonLabel={hasPermission('manageUsers') ? "Add Member" : null} 
+        onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} 
+      />
 
       <DataTable columns={columns} data={team} searchPlaceholder="Search team..." searchKey={['name', 'email', 'department', 'employee_id']} filters={filters} />
 
       {/* Add/Edit Member Modal */}
-      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Member' : 'Add Member'} maxWidth="max-w-lg">
-        <div className="space-y-4">
-          <FormField label="Employee ID"><Input value={form.employee_id} onChange={e => set('employee_id', e.target.value)} placeholder="NL-25-XX-001" /></FormField>
-          <FormField label="Name" required><Input value={form.name} onChange={e => set('name', e.target.value)} /></FormField>
-          <FormField label="Email" required><Input type="email" value={form.email} onChange={e => set('email', e.target.value)} /></FormField>
-          <FormField label="Position"><Select options={POSITION_NAMES} value={form.position} onChange={e => set('position', e.target.value)} /></FormField>
-          <FormField label="Department"><Input value={form.department} onChange={e => set('department', e.target.value)} /></FormField>
-          <FormField label="Status"><Select options={MEMBER_STATUS} value={form.status || 'Active'} onChange={e => set('status', e.target.value)} /></FormField>
+      <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Member' : 'Add Member'} maxWidth="max-w-2xl">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <FormField label="Employee ID"><Input value={form.employee_id} onChange={e => set('employee_id', e.target.value)} placeholder="NL-25-XX-001" /></FormField>
+            <FormField label="Name" required><Input value={form.name} onChange={e => set('name', e.target.value)} /></FormField>
+            <FormField label="Email" required><Input type="email" value={form.email} onChange={e => set('email', e.target.value)} /></FormField>
+            <FormField label="Status"><Select options={MEMBER_STATUS} value={form.status || 'Active'} onChange={e => set('status', e.target.value)} /></FormField>
+          </div>
+          
+          <div className="space-y-4">
+            <div className="bg-nuke-bg rounded-xl border border-nuke-border p-4">
+              <label className="text-xs font-bold text-nuke-muted uppercase mb-3 block">Positions</label>
+              <div className="grid grid-cols-1 gap-2">
+                {POSITION_NAMES.map(pos => {
+                  const isSelected = form.position?.includes(pos);
+                  return (
+                    <label key={pos} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all ${isSelected ? 'bg-nuke-orange/10 border-nuke-orange/30' : 'bg-white border-nuke-border hover:border-nuke-orange/30'}`}>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        onChange={(e) => {
+                          const current = Array.isArray(form.position) ? form.position : [form.position].filter(Boolean);
+                          if (e.target.checked) set('position', [...current, pos]);
+                          else set('position', current.filter(p => p !== pos));
+                        }}
+                        className="w-4 h-4 accent-nuke-orange"
+                      />
+                      <span className="text-sm font-medium">{pos}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-nuke-bg rounded-xl border border-nuke-border p-4">
+              <label className="text-xs font-bold text-nuke-muted uppercase mb-3 block">Departments</label>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <Input 
+                    placeholder="Add department..." 
+                    id="new-dept"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = e.target.value.trim();
+                        if (val && !form.department?.includes(val)) {
+                          set('department', [...(form.department || []), val]);
+                          e.target.value = '';
+                        }
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={() => {
+                      const input = document.getElementById('new-dept');
+                      const val = input.value.trim();
+                      if (val && !form.department?.includes(val)) {
+                        set('department', [...(form.department || []), val]);
+                        input.value = '';
+                      }
+                    }}
+                    className="px-3 bg-nuke-orange text-white rounded-lg hover:bg-nuke-orange-hover"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(form.department || []).map(dept => (
+                    <span key={dept} className="flex items-center gap-1 bg-white border border-nuke-border px-2 py-1 rounded-lg text-xs font-medium">
+                      {dept}
+                      <button onClick={() => set('department', form.department.filter(d => d !== dept))} className="text-nuke-muted hover:text-status-red">
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-nuke-border">
+        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-nuke-border">
           <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm border border-nuke-border rounded-lg hover:bg-nuke-bg transition-colors">Cancel</button>
-          <button onClick={handleSave} className="px-4 py-2 text-sm bg-nuke-orange text-white rounded-lg hover:bg-nuke-orange-hover transition-colors font-semibold">{editingId ? 'Update' : 'Add'}</button>
+          <button onClick={handleSave} className="px-4 py-2 text-sm bg-nuke-orange text-white rounded-lg hover:bg-nuke-orange-hover transition-colors font-semibold">{editingId ? 'Update Member' : 'Add Member'}</button>
         </div>
       </Modal>
 

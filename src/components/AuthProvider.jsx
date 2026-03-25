@@ -42,14 +42,34 @@ export function AuthProvider({ children }) {
             'Marketing Executive': 'ME',
             'Junior Executive': 'JE'
           };
-          const code = posCodes[position] || 'XX';
-
-          // Get count for sequence
-          const { count } = await supabase
-            .from('users')
-            .select('*', { count: 'exact', head: true });
           
-          const sequence = (count + 1).toString().padStart(3, '0');
+          // Use Junior Executive as default array
+          const positions = [position];
+          const code = posCodes[position] || 'XX';
+          const seqKey = `seq_${code}`;
+
+          // Get and increment persistent sequence for this position
+          const { data: seqData, error: seqError } = await supabase
+            .from('app_settings')
+            .select('value_int')
+            .eq('id', seqKey)
+            .single();
+          
+          let nextSeq = (seqData?.value_int || 0) + 1;
+          
+          if (seqData) {
+            await supabase
+              .from('app_settings')
+              .update({ value_int: nextSeq })
+              .eq('id', seqKey);
+          } else {
+            // Backup - initialize if missing for some reason
+            await supabase
+              .from('app_settings')
+              .insert({ id: seqKey, value_int: nextSeq });
+          }
+          
+          const sequence = nextSeq.toString().padStart(4, '0');
           const employeeId = `NL-${year}-${code}-${sequence}`;
 
           const { data: newUser, error: insertError } = await supabase
@@ -57,9 +77,10 @@ export function AuthProvider({ children }) {
             .insert({
               email: sessionUser.email,
               name: sessionUser.user_metadata?.full_name || sessionUser.email.split('@')[0],
-              position: position,
+              position: positions,
               employee_id: employeeId,
-              status: 'Active'
+              status: 'Active',
+              department: []
             })
             .select()
             .single();
@@ -67,11 +88,11 @@ export function AuthProvider({ children }) {
           if (newUser) {
             setUser({ ...sessionUser, ...newUser });
           } else {
-            setUser({ ...sessionUser, position: position });
+            setUser({ ...sessionUser, position: positions });
           }
         }
       } catch (e) {
-        setUser({ ...sessionUser, position: 'Junior Executive' });
+        setUser({ ...sessionUser, position: ['Junior Executive'] });
       }
       setLoading(false);
     }
@@ -88,9 +109,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const hasPermission = (permission) => {
-    if (!user || !user.position) return false;
-    const userPerms = PERMISSIONS[user.position] || {};
-    return userPerms.fullAccess || !!userPerms[permission];
+    if (!user || !user.position || !Array.isArray(user.position)) return false;
+    
+    return user.position.some(pos => {
+      const userPerms = PERMISSIONS[pos] || {};
+      return userPerms.fullAccess || !!userPerms[permission];
+    });
   };
 
   return (

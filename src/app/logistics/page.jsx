@@ -30,7 +30,11 @@ export default function LogisticsPage() {
     const numValue = Math.max(0, Number(value));
     const updated = { ...kit, [field]: numValue };
     try {
-      await supabase.from('kits').update({ [field]: numValue }).eq('id', kit.id);
+      const { error } = await supabase.from('kits').update({ [field]: numValue }).eq('id', kit.id);
+      if (error) {
+        alert(`Failed to update inventory: ${error.message}`);
+        return;
+      }
       fetchKits();
     } catch (e) {
       setKits(kits.map(k => k.id === kit.id ? updated : k));

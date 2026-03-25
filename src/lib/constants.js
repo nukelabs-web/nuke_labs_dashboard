@@ -73,13 +73,13 @@ export const MEMBER_STATUS = [
 
 // Permissions by position
 export const PERMISSIONS = {
-  'Founder': { fullAccess: true, promote: true, editRoles: true, manageUsers: true, assignTasks: true, assignWorkshops: true, assignColleges: true, viewAll: true },
-  'Core Team': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: true, assignWorkshops: true, assignColleges: true, viewAll: true },
-  'Senior Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: true, assignWorkshops: true, assignColleges: true, viewAll: true },
-  'Business Development Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, viewAll: false },
-  'Operations Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, viewAll: false },
-  'Marketing Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, viewAll: false },
-  'Junior Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, viewAll: false },
+  'Founder': { fullAccess: true, promote: true, editRoles: true, manageUsers: true, assignTasks: true, assignWorkshops: true, assignColleges: true, manageTrainers: true, viewAll: true },
+  'Core Team': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: true, assignWorkshops: true, assignColleges: true, manageTrainers: true, viewAll: true },
+  'Senior Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: true, assignWorkshops: true, assignColleges: true, manageTrainers: true, viewAll: true },
+  'Business Development Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, manageTrainers: false, viewAll: false },
+  'Operations Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, manageTrainers: false, viewAll: false },
+  'Marketing Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, manageTrainers: false, viewAll: false },
+  'Junior Executive': { fullAccess: false, promote: false, editRoles: false, manageUsers: false, assignTasks: false, assignWorkshops: false, assignColleges: false, manageTrainers: false, viewAll: false },
 };
 
 export const NAV_ITEMS = [

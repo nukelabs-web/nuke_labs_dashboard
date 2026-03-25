@@ -54,28 +54,35 @@ export default function CollegesPage() {
   };
 
   // Filter based on user rank
-  const filteredColleges = user?.position === 'Junior Executive' 
+  const isJuniorOnly = (user?.position?.includes('Junior Executive') || false) && !hasPermission('viewAll');
+  const filteredColleges = isJuniorOnly 
     ? colleges.filter(c => c.assigned_to === user.name)
     : colleges;
 
   const handleSave = async () => {
     try {
+      let result;
       if (editingId) {
-        await supabase.from('colleges').update(form).eq('id', editingId);
+        result = await supabase.from('colleges').update(form).eq('id', editingId);
       } else {
-        await supabase.from('colleges').insert(form);
+        result = await supabase.from('colleges').insert(form);
       }
+
+      if (result.error) {
+        alert(`Error: ${result.error.message}`);
+        return;
+      }
+
       fetchColleges();
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     } catch (e) {
       if (editingId) {
         setColleges(colleges.map(c => c.id === editingId ? { ...c, ...form } : c));
       } else {
         setColleges([{ ...form, id: Date.now() }, ...colleges]);
       }
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     }
-    setShowModal(false);
-    setEditingId(null);
-    setForm(emptyForm);
   };
 
   const handleEdit = (college) => {
@@ -87,7 +94,11 @@ export default function CollegesPage() {
   const handleDelete = async (id) => {
     if (!confirm('Delete this college?')) return;
     try {
-      await supabase.from('colleges').delete().eq('id', id);
+      const { error } = await supabase.from('colleges').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete: ${error.message}${error.details ? ` (${error.details})` : ''}`);
+        return;
+      }
       fetchColleges();
     } catch (e) {
       setColleges(colleges.filter(c => c.id !== id));
@@ -126,15 +137,15 @@ export default function CollegesPage() {
     <div className="animate-fade-in">
       <PageHeader 
         title="Colleges" 
-        subtitle={user?.position === 'Junior Executive' ? "My assigned college leads" : "Manage college outreach and leads"} 
-        buttonLabel={hasPermission('assignColleges') || user?.position === 'Junior Executive' ? "Add College" : null} 
+        subtitle={isJuniorOnly ? "My assigned college leads" : "Manage college outreach and leads"} 
+        buttonLabel={hasPermission('assignColleges') || isJuniorOnly ? "Add College" : null} 
         onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} 
       />
 
       <DataTable columns={columns} data={filteredColleges} searchPlaceholder="Search colleges..." searchKey={['name', 'city', 'contact_person']} filters={filters} />
 
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit College' : 'Add College'} maxWidth="max-w-2xl">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="College Name" required><Input value={form.name} onChange={e => set('name', e.target.value)} /></FormField>
           <FormField label="City" required><Input value={form.city} onChange={e => set('city', e.target.value)} /></FormField>
           <FormField label="State"><Input value={form.state} onChange={e => set('state', e.target.value)} /></FormField>

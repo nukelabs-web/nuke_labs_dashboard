@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/components/AuthProvider';
 import PageHeader from '@/components/PageHeader';
 import DataTable from '@/components/DataTable';
 import StatusBadge from '@/components/StatusBadge';
@@ -30,6 +31,7 @@ const emptyForm = {
 };
 
 export default function TrainersPage() {
+  const { user, hasPermission } = useAuth();
   const [trainers, setTrainers] = useState(demoTrainers);
   const [showModal, setShowModal] = useState(false);
   const [showPromoteModal, setShowPromoteModal] = useState(false);
@@ -60,14 +62,26 @@ export default function TrainersPage() {
   const handleSave = async () => {
     const payload = { ...form, workshops_conducted: Number(form.workshops_conducted) || 0, rating: parseFloat(form.rating) || 0 };
     try {
-      if (editingId) { await supabase.from('trainers').update(payload).eq('id', editingId); }
-      else { await supabase.from('trainers').insert(payload); }
+      let result;
+      if (editingId) {
+        result = await supabase.from('trainers').update(payload).eq('id', editingId);
+      } else {
+        result = await supabase.from('trainers').insert(payload);
+      }
+      
+      if (result.error) {
+        alert(`Error: ${result.error.message}`);
+        return;
+      }
+      
       fetchTrainers();
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     } catch (e) {
+      // Offline/Mock fallback
       if (editingId) { setTrainers(trainers.map(t => t.id === editingId ? { ...t, ...payload } : t)); }
       else { setTrainers([{ ...payload, id: Date.now() }, ...trainers]); }
+      setShowModal(false); setEditingId(null); setForm(emptyForm);
     }
-    setShowModal(false); setEditingId(null); setForm(emptyForm);
   };
 
   const handleEdit = (t) => {
@@ -77,8 +91,16 @@ export default function TrainersPage() {
 
   const handleDelete = async (id) => {
     if (!confirm('Delete this trainer?')) return;
-    try { await supabase.from('trainers').delete().eq('id', id); fetchTrainers(); }
-    catch (e) { setTrainers(trainers.filter(t => t.id !== id)); }
+    try {
+      const { error } = await supabase.from('trainers').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete: ${error.message}${error.details ? ` (${error.details})` : ''}`);
+        return;
+      }
+      fetchTrainers();
+    } catch (e) {
+      setTrainers(trainers.filter(t => t.id !== id));
+    }
   };
 
   const getLevelRank = (level) => TRAINER_LEVELS.find(l => l.name === level)?.rank || 99;
@@ -132,14 +154,22 @@ export default function TrainersPage() {
       key: 'actions', label: 'Actions', sortable: false,
       render: (row) => (
         <div className="flex gap-1">
-          <button onClick={(e) => { e.stopPropagation(); openPromote(row); }} className="p-1.5 text-status-green hover:bg-status-green/10 rounded transition-colors" title="Promote">
-            <ArrowUp size={14} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); viewTrainerHistory(row); }} className="p-1.5 text-status-purple hover:bg-status-purple/10 rounded transition-colors" title="Promotion History">
-            <History size={14} />
-          </button>
-          <button onClick={(e) => { e.stopPropagation(); handleEdit(row); }} className="px-2 py-1 text-xs text-nuke-orange hover:bg-nuke-orange/10 rounded transition-colors">Edit</button>
-          <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="px-2 py-1 text-xs text-status-red hover:bg-status-red/10 rounded transition-colors">Delete</button>
+          {hasPermission('promote') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); openPromote(row); }} className="p-1.5 text-status-green hover:bg-status-green/10 rounded transition-colors" title="Promote">
+                <ArrowUp size={14} />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); viewTrainerHistory(row); }} className="p-1.5 text-status-purple hover:bg-status-purple/10 rounded transition-colors" title="Promotion History">
+                <History size={14} />
+              </button>
+            </>
+          )}
+          {hasPermission('manageTrainers') && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); handleEdit(row); }} className="px-2 py-1 text-xs text-nuke-orange hover:bg-nuke-orange/10 rounded transition-colors">Edit</button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(row.id); }} className="px-2 py-1 text-xs text-status-red hover:bg-status-red/10 rounded transition-colors">Delete</button>
+            </>
+          )}
         </div>
       ),
     },
@@ -155,12 +185,17 @@ export default function TrainersPage() {
 
   return (
     <div className="animate-fade-in">
-      <PageHeader title="Trainers" subtitle="Manage trainer network and levels" buttonLabel="Add Trainer" onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} />
+      <PageHeader 
+        title="Trainers" 
+        subtitle="Manage trainer network and levels" 
+        buttonLabel={hasPermission('manageTrainers') ? "Add Trainer" : null} 
+        onButtonClick={() => { setForm(emptyForm); setEditingId(null); setShowModal(true); }} 
+      />
       <DataTable columns={columns} data={trainers} searchPlaceholder="Search trainers..." searchKey={['name', 'city', 'skills']} filters={filters} />
 
       {/* Add/Edit Modal */}
       <Modal isOpen={showModal} onClose={() => setShowModal(false)} title={editingId ? 'Edit Trainer' : 'Add Trainer'} maxWidth="max-w-2xl">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Name" required><Input value={form.name} onChange={e => set('name', e.target.value)} /></FormField>
           <FormField label="Organization"><Input value={form.organization} onChange={e => set('organization', e.target.value)} /></FormField>
           <FormField label="City" required><Input value={form.city} onChange={e => set('city', e.target.value)} /></FormField>
